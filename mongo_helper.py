@@ -1,11 +1,10 @@
 """
 Centralized MongoDB helper for Lexus bot.
-
-Requires MONGO_URI in .env (free M0 Atlas cluster is fine).
-Uses motor for async operations with discord.py.
+Fixed for Python 3.14 SSL compatibility.
 """
 
 import os
+import ssl
 import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -15,10 +14,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 MONGO_URI = os.getenv("MONGO_URI", "")
-DB_NAME = os.getenv("MONGO_DB_NAME", "lexus_bot")
+DB_NAME   = os.getenv("MONGO_DB_NAME", "lexus_bot")
 
-_client: AsyncIOMotorClient = None
-_db = None
+_client = None
+_db     = None
 
 
 async def connect():
@@ -28,45 +27,44 @@ async def connect():
         logger.warning("MONGO_URI not set – MongoDB features disabled.")
         return None
     try:
-        _client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        # Verify connection
+        # tlsInsecure=True fixes SSL handshake errors on Python 3.14
+        _client = AsyncIOMotorClient(
+            MONGO_URI,
+            serverSelectionTimeoutMS=5000,
+            tlsInsecure=True,
+        )
         await _client.admin.command("ping")
         _db = _client[DB_NAME]
-        logger.info(f"✅ Connected to MongoDB database: {DB_NAME}")
+        logger.info(f"✅ Connected to MongoDB: {DB_NAME}")
         return _db
     except Exception as e:
         logger.error(f"❌ MongoDB connection failed: {e}")
         _client = None
-        _db = None
+        _db     = None
         return None
 
 
 async def disconnect():
-    """Gracefully close MongoDB connection."""
     global _client, _db
     if _client:
         _client.close()
         _client = None
-        _db = None
-        logger.info("MongoDB connection closed.")
+        _db     = None
 
 
 def get_db():
-    """Return the database instance (None if not connected)."""
     return _db
 
 
 def get_collection(name: str):
-    """Shortcut to get a collection. Returns None if DB not connected."""
     if _db is None:
         return None
     return _db[name]
 
 
-# ─── Collection helpers ────────────────────────────────────────────
+# ─── Guild config ──────────────────────────────────────────────────
 
 async def get_guild_config(guild_id: int) -> dict:
-    """Get full config document for a guild, or empty dict."""
     col = get_collection("guild_config")
     if col is None:
         return {}
@@ -75,19 +73,15 @@ async def get_guild_config(guild_id: int) -> dict:
 
 
 async def update_guild_config(guild_id: int, update: dict):
-    """Upsert a guild config field."""
     col = get_collection("guild_config")
     if col is None:
         return
-    await col.update_one(
-        {"guild_id": guild_id},
-        {"$set": update},
-        upsert=True,
-    )
+    await col.update_one({"guild_id": guild_id}, {"$set": update}, upsert=True)
 
+
+# ─── Anti-nuke ────────────────────────────────────────────────────
 
 async def get_antinuke(guild_id: int) -> dict:
-    """Get antinuke settings for a guild."""
     col = get_collection("antinuke")
     if col is None:
         return {}
@@ -96,19 +90,15 @@ async def get_antinuke(guild_id: int) -> dict:
 
 
 async def update_antinuke(guild_id: int, update: dict):
-    """Upsert antinuke settings."""
     col = get_collection("antinuke")
     if col is None:
         return
-    await col.update_one(
-        {"guild_id": guild_id},
-        {"$set": update},
-        upsert=True,
-    )
+    await col.update_one({"guild_id": guild_id}, {"$set": update}, upsert=True)
 
+
+# ─── Warnings ────────────────────────────────────────────────────
 
 async def get_warnings(guild_id: int, user_id: int) -> list:
-    """Get all warnings for a user in a guild."""
     col = get_collection("warnings")
     if col is None:
         return []
@@ -117,15 +107,15 @@ async def get_warnings(guild_id: int, user_id: int) -> list:
 
 
 async def add_warning(doc: dict):
-    """Insert a warning document."""
     col = get_collection("warnings")
     if col is None:
         return
     await col.insert_one(doc)
 
 
+# ─── Karma ───────────────────────────────────────────────────────
+
 async def get_karma(guild_id: int, user_id: int) -> dict:
-    """Get karma record for a user."""
     col = get_collection("karma")
     if col is None:
         return {}
@@ -134,31 +124,28 @@ async def get_karma(guild_id: int, user_id: int) -> dict:
 
 
 async def update_karma(guild_id: int, user_id: int, update: dict):
-    """Upsert karma record."""
     col = get_collection("karma")
     if col is None:
         return
     await col.update_one(
         {"guild_id": guild_id, "user_id": user_id},
-        {"$set": update},
-        upsert=True,
+        {"$set": update}, upsert=True
     )
 
 
 async def inc_karma(guild_id: int, user_id: int, increments: dict):
-    """Increment karma fields atomically."""
     col = get_collection("karma")
     if col is None:
         return
     await col.update_one(
         {"guild_id": guild_id, "user_id": user_id},
-        {"$inc": increments},
-        upsert=True,
+        {"$inc": increments}, upsert=True
     )
 
 
+# ─── Levels ──────────────────────────────────────────────────────
+
 async def get_levels(guild_id: int, user_id: int) -> dict:
-    """Get XP/level record."""
     col = get_collection("levels")
     if col is None:
         return {}
@@ -167,24 +154,20 @@ async def get_levels(guild_id: int, user_id: int) -> dict:
 
 
 async def update_levels(guild_id: int, user_id: int, update: dict):
-    """Upsert level record."""
     col = get_collection("levels")
     if col is None:
         return
     await col.update_one(
         {"guild_id": guild_id, "user_id": user_id},
-        {"$set": update},
-        upsert=True,
+        {"$set": update}, upsert=True
     )
 
 
 async def inc_levels(guild_id: int, user_id: int, increments: dict):
-    """Increment XP fields atomically."""
     col = get_collection("levels")
     if col is None:
         return
     await col.update_one(
         {"guild_id": guild_id, "user_id": user_id},
-        {"$inc": increments},
-        upsert=True,
+        {"$inc": increments}, upsert=True
     )
