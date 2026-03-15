@@ -266,7 +266,6 @@ def run_api():
     if not API_AVAILABLE:
         # If api.py is missing, spin up a minimal health-check server
         from fastapi import FastAPI
-        import uvicorn
         _app = FastAPI()
 
         @_app.get("/")
